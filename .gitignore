@@ -1,0 +1,10 @@
+venv/
+venv_webrtc/
+datasets/
+runs/
+tasks/
+*.docx
+*.pptx
+*.zip
+.agents/
+.env
