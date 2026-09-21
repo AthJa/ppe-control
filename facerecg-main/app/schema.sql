@@ -24,6 +24,8 @@ CREATE TABLE IF NOT EXISTS entry_logs (
     matched_name   TEXT,                           -- denormalized, survives staff deletion
     similarity     REAL,
     decision       TEXT NOT NULL,                  -- AUTHORIZED | DENIED | UNKNOWN
-    snapshot_path  TEXT
+    snapshot_path  TEXT,
+    ppe_status     TEXT,                           -- COMPLIANT | NON_COMPLIANT | NOT_CHECKED | NULL
+    ppe_missing    TEXT                            -- comma-separated missing PPE classes, or NULL
 );
 CREATE INDEX IF NOT EXISTS idx_entry_logs_ts ON entry_logs(ts);

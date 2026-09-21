@@ -7,4 +7,12 @@ tasks/
 *.pptx
 *.zip
 .agents/
-.env
+.envstep1*.py
+step2*.py
+step3*.py
+step4*.py
+generate*.py
+filter*.py
+train*.ipynb
+yolo*.pt
+weights/

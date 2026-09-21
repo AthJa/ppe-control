@@ -21,23 +21,45 @@ def _warm_up_models():
 
 _warm_up_models()
 
-st.title("Masked-Face Staff Entry Recognition - POC")
+st.title("Masked-Face Staff Entry Recognition + PPE Detection")
 st.markdown(
     """
 Use the sidebar to:
 - **Register Staff** - enroll a new staff member via webcam burst capture (mask + hair cap on).
 - **Manage Authorization** - authorize/deauthorize or remove staff.
-- **Entry Logs** - review entry attempts recorded by `entry_monitor.py`.
+- **Entry Logs** - review entry attempts recorded by the entry monitor (includes PPE status).
 
-Run the live entry camera separately:
+Run the **unified** entry camera (face recognition + PPE detection in one loop):
 ```
-python app/entry_monitor.py
+python unified_entry_monitor.py
+```
+
+Or run the original standalone monitors separately:
+```
+python facerecg-main/app/entry_monitor.py   # face recognition only
+python step4_compliance_arbiter_medical_ppe.py  # PPE detection only
 ```
 """
 )
 
 staff_df = db.list_staff()
+logs_df = db.query_entry_logs(limit=1000)
+
 col1, col2, col3 = st.columns(3)
 col1.metric("Registered staff", len(staff_df))
 col2.metric("Authorized", int(staff_df["authorized"].sum()) if not staff_df.empty else 0)
 col3.metric("Deauthorized", int((staff_df["authorized"] == 0).sum()) if not staff_df.empty else 0)
+
+# PPE compliance metrics (only shown if unified monitor has logged entries)
+if not logs_df.empty and "ppe_status" in logs_df.columns and logs_df["ppe_status"].notna().any():
+    st.divider()
+    st.subheader("PPE Compliance (recent 1000 entries)")
+    ppe_col1, ppe_col2, ppe_col3 = st.columns(3)
+    compliant = int((logs_df["ppe_status"] == "COMPLIANT").sum())
+    non_compliant = int((logs_df["ppe_status"] == "NON_COMPLIANT").sum())
+    checked = compliant + non_compliant
+    rate = f"{100 * compliant / checked:.0f}%" if checked > 0 else "N/A"
+    ppe_col1.metric("PPE Compliant", compliant)
+    ppe_col2.metric("PPE Non-Compliant", non_compliant)
+    ppe_col3.metric("Compliance Rate", rate)
+

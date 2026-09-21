@@ -20,6 +20,12 @@ decisions = col3.multiselect(
     default=["AUTHORIZED", "DENIED", "UNKNOWN"],
 )
 name_filter = st.text_input("Filter by name contains")
+ppe_filter = st.multiselect(
+    "PPE Status",
+    ["COMPLIANT", "NON_COMPLIANT", "NOT_CHECKED", ""],
+    default=[],
+    help="Filter by PPE compliance outcome. Leave empty to show all.",
+)
 
 start_ts = f"{start_date.isoformat()} 00:00:00"
 end_ts = f"{end_date.isoformat()} 23:59:59"
@@ -31,10 +37,17 @@ logs_df = db.query_entry_logs(
     limit=500,
 )
 
-m1, m2, m3 = st.columns(3)
+# Apply optional PPE status filter (client-side — fast on ≤500 rows)
+if ppe_filter and not logs_df.empty and "ppe_status" in logs_df.columns:
+    logs_df = logs_df[logs_df["ppe_status"].isin(ppe_filter)]
+
+m1, m2, m3, m4, m5 = st.columns(5)
 m1.metric("Authorized", int((logs_df["decision"] == "AUTHORIZED").sum()) if not logs_df.empty else 0)
 m2.metric("Denied", int((logs_df["decision"] == "DENIED").sum()) if not logs_df.empty else 0)
 m3.metric("Unknown", int((logs_df["decision"] == "UNKNOWN").sum()) if not logs_df.empty else 0)
+if not logs_df.empty and "ppe_status" in logs_df.columns:
+    m4.metric("PPE Compliant", int((logs_df["ppe_status"] == "COMPLIANT").sum()))
+    m5.metric("PPE Non-Compliant", int((logs_df["ppe_status"] == "NON_COMPLIANT").sum()))
 
 st.dataframe(logs_df, use_container_width=True)
 

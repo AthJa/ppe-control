@@ -28,6 +28,16 @@ def init_db():
     conn = get_connection()
     with open(config.SCHEMA_PATH, "r", encoding="utf-8") as f:
         conn.executescript(f.read())
+    # Migration: add PPE columns to existing databases that pre-date this change.
+    # ALTER TABLE fails silently (via try/except) if the column already exists.
+    for col_def in (
+        "ALTER TABLE entry_logs ADD COLUMN ppe_status TEXT",
+        "ALTER TABLE entry_logs ADD COLUMN ppe_missing TEXT",
+    ):
+        try:
+            conn.execute(col_def)
+        except Exception:
+            pass  # column already exists — harmless
     conn.commit()
     conn.close()
 
@@ -93,12 +103,16 @@ def get_all_embeddings():
     return df
 
 
-def insert_entry_log(staff_id, matched_name, similarity, decision, snapshot_path=None):
+def insert_entry_log(
+    staff_id, matched_name, similarity, decision,
+    snapshot_path=None, ppe_status=None, ppe_missing=None
+):
     conn = get_connection()
     conn.execute(
-        "INSERT INTO entry_logs (staff_id, matched_name, similarity, decision, snapshot_path) "
-        "VALUES (?, ?, ?, ?, ?)",
-        (staff_id, matched_name, similarity, decision, snapshot_path),
+        "INSERT INTO entry_logs "
+        "(staff_id, matched_name, similarity, decision, snapshot_path, ppe_status, ppe_missing) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (staff_id, matched_name, similarity, decision, snapshot_path, ppe_status, ppe_missing),
     )
     conn.commit()
     conn.close()
