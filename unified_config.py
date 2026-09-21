@@ -58,10 +58,11 @@ BURST_CAPTURE_INTERVAL_SEC = 1.2
 
 # All mandated PPE classes — adjust to enforce a different subset
 MANDATED_SET = {'mask'}
+# MANDATED_SET = {'coverall', 'gloves', 'goggles', 'mask'}
 
 # Temporal validation
 HISTORY_LEN = 100       # number of frames to keep in rolling history
-MIN_DETECT_COUNT = 5    # item must appear in at least this many frames to be "validated"
+MIN_DETECT_COUNT = 10    # item must appear in at least this many frames to be "validated"
 EVAL_TIMEOUT = 10.0     # seconds to present all required PPE
 
 # YOLO confidence
