@@ -37,13 +37,12 @@ Only `AUTHORIZED` (enrolled + authorized) staff trigger PPE evaluation. Unknown 
 ## Setup
 
 ```bash
-# Activate the project venv (same venv as the existing system)
+# Activate the project venv
 .\venv\Scripts\activate       # Windows
 
-# Dependencies already installed if you've run facerecg-main or step3/step4 before.
-# If not:
-pip install -r facerecg-main/requirements.txt
-pip install ultralytics
+# Install dependencies (Python 3.13 compatible)
+pip install -r requirements.txt
+pip install facenet-pytorch --no-deps
 ```
 
 Make sure you have:
