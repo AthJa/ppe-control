@@ -36,7 +36,8 @@ PPE_MODEL_PATH = os.path.join(PROJECT_ROOT, "model", "best.pt")
 
 # Embedding
 EMBEDDING_DIM = 512
-MATCH_THRESHOLD = 0.62      # placeholder — calibrate with tools/calibrate_threshold.py
+MATCH_THRESHOLD = 0.50      # calibrated threshold for stable live webcam matching
+
 
 # Entry monitor
 CAMERA_INDEX = 0
@@ -44,13 +45,20 @@ LOG_COOLDOWN_SECONDS = 15
 DETECTION_DOWNSCALE = 0.5   # resize factor applied before face detection; boxes scaled back up
 
 # Detector (YuNet)
-DETECTOR_SCORE_THRESHOLD = 0.6   # lowered from 0.9 — occluded (mask/cap) faces score lower
+DETECTOR_SCORE_THRESHOLD = 0.5   # lowered from 0.9 — occluded (mask/cap) faces score lower
 YUNET_NMS_THRESHOLD = 0.3
 
 # Enrollment
 MIN_ENROLL_IMAGES = 3
 BURST_CAPTURE_COUNT = 8
 BURST_CAPTURE_INTERVAL_SEC = 1.2
+
+# Face Tracking & Anti-Flicker (smoothing, persistence, hysteresis)
+FACE_TRACK_MAX_LOST_FRAMES = 10   # persistence frames across momentary detector misses
+FACE_SMOOTHING_ALPHA = 0.7       # EMA weight for box coordinates (higher = responsive, lower = smoother)
+FACE_HYSTERESIS_MARGIN = 0.06    # allowed similarity dip below threshold while maintaining AUTHORIZED
+FACE_HYSTERESIS_FRAMES = 5       # consecutive low-similarity frames needed to revert to UNKNOWN
+
 
 # ---------------------------------------------------------------------------
 # PPE Detection Tunables (from step4_compliance_arbiter_medical_ppe.py)
@@ -66,7 +74,7 @@ MIN_DETECT_COUNT = 10    # item must appear in at least this many frames to be "
 EVAL_TIMEOUT = 10.0     # seconds to present all required PPE
 
 # YOLO confidence
-DEFAULT_CONF = 0.5
+DEFAULT_CONF = 0.6
 CLASS_CONF = {
     1: 0.65,
     2: 0.85,    # Goggles — raised to reduce false positives on spectacles
@@ -89,7 +97,23 @@ PPE_BOX_COLORS = {
     3: (0, 0, 255),     # Mask     — red
 }
 
+# Maximum boxes to display per class at all times
+MAX_BOXES_PER_CLASS = {
+    0: 1,  # coverall — max 1 box
+    1: 2,  # gloves   — max 2 boxes
+    2: 1,  # goggles  — max 1 box
+    3: 1,  # mask     — max 1 box
+    'coverall': 1,
+    'gloves': 2,
+    'goggles': 1,
+    'mask': 1,
+}
+
+# Maximum allowed IoU between two glove boxes to consider them non-overlapping
+GLOVE_OVERLAP_IOU_THRESHOLD = 0.1
+
 # ---------------------------------------------------------------------------
+
 # Combined System Tunables
 # ---------------------------------------------------------------------------
 

@@ -3,6 +3,8 @@ import time
 from collections import deque
 from ultralytics import YOLO
 import os
+from ppe_filter import filter_and_validate_ppe
+
 
 # ==========================================
 # CONFIGURATION
@@ -32,6 +34,16 @@ CLASS_NAMES = {
     2: 'goggles',
     3: 'mask',
 }
+
+# Maximum boxes to display per class at all times
+MAX_BOXES_PER_CLASS = {
+    0: 1,  # coverall — max 1 box
+    1: 2,  # gloves   — max 2 boxes
+    2: 1,  # goggles  — max 1 box
+    3: 1,  # mask     — max 1 box
+}
+GLOVE_OVERLAP_IOU_THRESHOLD = 0.1
+
 
 MODEL_PATH = (
     os.path.join("model", "best.pt")
@@ -77,17 +89,24 @@ def main():
             break
 
         # 1. Run YOLO Inference
-        results = model.predict(frame, verbose=False, conf=0.5)
+        results = model.predict(frame, verbose=False, conf=DEFAULT_CONF)
 
-        # Parse detections in this frame (with per-class confidence filtering)
-        current_frame_detections = set()
+        raw_detections = []
         for r in results:
             for box in r.boxes:
                 cls_id = int(box.cls[0])
                 conf = float(box.conf[0])
-                min_conf = CLASS_CONF.get(cls_id, DEFAULT_CONF)
-                if cls_id in CLASS_NAMES and conf >= min_conf:
-                    current_frame_detections.add(CLASS_NAMES[cls_id])
+                x1, y1, x2, y2 = map(int, box.xyxy[0])
+                raw_detections.append((cls_id, conf, x1, y1, x2, y2))
+
+        current_frame_detections, display_boxes = filter_and_validate_ppe(
+            raw_detections,
+            class_names=CLASS_NAMES,
+            class_conf=CLASS_CONF,
+            default_conf=DEFAULT_CONF,
+            max_boxes_per_class=MAX_BOXES_PER_CLASS,
+            glove_iou_threshold=GLOVE_OVERLAP_IOU_THRESHOLD,
+        )
 
         # Add to rolling history
         history.append(current_frame_detections)
@@ -103,7 +122,7 @@ def main():
         validated_set = {cls for cls, count in counts.items() if count >= MIN_DETECT_COUNT}
 
         # 3. State Machine Logic
-        # Draw only boxes that pass the per-class confidence threshold
+        # Draw filtered boxes (max 2 for gloves, max 1 for others)
         annotated_frame = frame.copy()
         BOX_COLORS = {
             0: (255, 165, 0),   # Coverall - orange
@@ -111,18 +130,13 @@ def main():
             2: (255, 255, 0),   # Goggles  - cyan
             3: (0, 0, 255),     # Mask     - red
         }
-        for r in results:
-            for box in r.boxes:
-                cls_id = int(box.cls[0])
-                conf = float(box.conf[0])
-                min_conf = CLASS_CONF.get(cls_id, DEFAULT_CONF)
-                if cls_id in CLASS_NAMES and conf >= min_conf:
-                    x1, y1, x2, y2 = map(int, box.xyxy[0])
-                    color = BOX_COLORS.get(cls_id, (255, 255, 255))
-                    label = f"{CLASS_NAMES[cls_id]} {conf:.2f}"
-                    cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), color, 2)
-                    cv2.putText(annotated_frame, label, (x1, y1 - 8),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+        for cls_id, conf, x1, y1, x2, y2 in display_boxes:
+            color = BOX_COLORS.get(cls_id, (255, 255, 255))
+            label = f"{CLASS_NAMES[cls_id]} {conf:.2f}"
+            cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), color, 2)
+            cv2.putText(annotated_frame, label, (x1, y1 - 8),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+
 
         if state == "IDLE":
             # If we see ANY mandated item, someone is likely in frame. Start evaluation.

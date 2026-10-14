@@ -41,6 +41,8 @@ import db
 
 import unified_config as cfg
 from unified_state_machine import UnifiedStateMachine, State
+from ppe_filter import filter_and_validate_ppe
+from face_tracker import FaceTracker
 
 # ---------------------------------------------------------------------------
 # YOLO — loaded lazily to avoid import-time cost when camera isn't available
@@ -65,10 +67,18 @@ class _FaceWorker:
 
     Identical threading pattern to facerecg-main/app/entry_monitor.py's
     _DetectionWorker, so the video preview never freezes on CPU-bound inference.
+    Uses FaceTracker to eliminate bounding box flickering and decision flip-flopping.
     """
 
     def __init__(self, threshold: float):
         self.threshold = threshold
+        self.tracker = FaceTracker(
+            threshold=threshold,
+            smoothing_alpha=getattr(cfg, "FACE_SMOOTHING_ALPHA", 0.7),
+            max_lost_frames=getattr(cfg, "FACE_TRACK_MAX_LOST_FRAMES", 4),
+            hysteresis_margin=getattr(cfg, "FACE_HYSTERESIS_MARGIN", 0.06),
+            hysteresis_frames=getattr(cfg, "FACE_HYSTERESIS_FRAMES", 5),
+        )
         self._frame_lock = threading.Lock()
         self._latest_frame = None
         self._latest_frame_id = 0
@@ -120,8 +130,12 @@ class _FaceWorker:
                 m = face_engine.match(emb, threshold=self.threshold)
                 results.append((x1, y1, x2, y2, m))
 
+            # Apply temporal tracking, EMA coordinate smoothing, and hysteresis
+            stabilized_results = self.tracker.update(results)
+
             with self._results_lock:
-                self.last_faces = results
+                self.last_faces = stabilized_results
+
 
 
 # ---------------------------------------------------------------------------
@@ -129,29 +143,35 @@ class _FaceWorker:
 # ---------------------------------------------------------------------------
 
 def _detect_ppe(frame) -> tuple[set, list]:
-    """Run YOLO PPE detection on a frame.
+    """Run YOLO PPE detection on a frame with filtering and validation constraints.
 
     Returns
     -------
-    detected_names : set of PPE class names that passed per-class confidence
-    raw_boxes      : list of (cls_id, conf, x1, y1, x2, y2) for rendering
+    detected_names : set of PPE class names validated in this frame
+                     (gloves requires 2 non-overlapping boxes)
+    filtered_boxes : list of (cls_id, conf, x1, y1, x2, y2) for rendering
+                     (max 2 for gloves, max 1 for mask, coverall, goggles)
     """
     model = _get_yolo()
     results = model.predict(frame, verbose=False, conf=cfg.DEFAULT_CONF)
-    detected_names: set = set()
-    raw_boxes: list = []
+    raw_detections: list = []
 
     for r in results:
         for box in r.boxes:
             cls_id = int(box.cls[0])
             conf = float(box.conf[0])
-            min_conf = cfg.CLASS_CONF.get(cls_id, cfg.DEFAULT_CONF)
-            if cls_id in cfg.CLASS_NAMES and conf >= min_conf:
-                detected_names.add(cfg.CLASS_NAMES[cls_id])
-                x1, y1, x2, y2 = map(int, box.xyxy[0])
-                raw_boxes.append((cls_id, conf, x1, y1, x2, y2))
+            x1, y1, x2, y2 = map(int, box.xyxy[0])
+            raw_detections.append((cls_id, conf, x1, y1, x2, y2))
 
-    return detected_names, raw_boxes
+    return filter_and_validate_ppe(
+        raw_detections,
+        class_names=cfg.CLASS_NAMES,
+        class_conf=cfg.CLASS_CONF,
+        default_conf=cfg.DEFAULT_CONF,
+        max_boxes_per_class=cfg.MAX_BOXES_PER_CLASS,
+        glove_iou_threshold=cfg.GLOVE_OVERLAP_IOU_THRESHOLD,
+    )
+
 
 
 # ---------------------------------------------------------------------------
@@ -230,12 +250,39 @@ def _ensure_snapshot_dirs():
         os.makedirs(os.path.join(cfg.ENTRY_SNAPSHOTS_DIR, d), exist_ok=True)
 
 
-def _save_snapshot(frame, decision: str, key) -> str | None:
+def _save_snapshot(
+    frame,
+    decision: str,
+    key,
+    face_box: tuple[int, int, int, int] | None = None,
+    face_crop=None,
+) -> str | None:
     crop_dir = os.path.join(cfg.ENTRY_SNAPSHOTS_DIR, decision)
     os.makedirs(crop_dir, exist_ok=True)
     path = os.path.join(crop_dir, f"{int(time.time())}_{key}.jpg")
-    cv2.imwrite(path, frame)
-    return path
+
+    img_to_save = None
+    if face_crop is not None and getattr(face_crop, "size", 0) > 0:
+        img_to_save = face_crop
+    elif face_box is not None and frame is not None:
+        h, w = frame.shape[:2]
+        x1 = max(0, int(face_box[0]))
+        y1 = max(0, int(face_box[1]))
+        x2 = min(w, int(face_box[2]))
+        y2 = min(h, int(face_box[3]))
+        if x2 > x1 and y2 > y1:
+            crop = frame[y1:y2, x1:x2]
+            if crop.size > 0:
+                img_to_save = crop
+
+    if img_to_save is None:
+        img_to_save = frame
+
+    if img_to_save is not None and getattr(img_to_save, "size", 0) > 0:
+        cv2.imwrite(path, img_to_save)
+        return path
+    return None
+
 
 
 # ---------------------------------------------------------------------------
@@ -243,10 +290,18 @@ def _save_snapshot(frame, decision: str, key) -> str | None:
 # ---------------------------------------------------------------------------
 
 def run(camera_index: int, threshold: float, cooldown: float) -> int:
+    # Synchronize tunables with face_engine's config module
+    import config as face_cfg
+    face_cfg.DETECTOR_SCORE_THRESHOLD = cfg.DETECTOR_SCORE_THRESHOLD
+    face_cfg.YUNET_NMS_THRESHOLD = cfg.YUNET_NMS_THRESHOLD
+    face_cfg.MATCH_THRESHOLD = threshold
+    face_cfg.DETECTION_DOWNSCALE = cfg.DETECTION_DOWNSCALE
+
     # Initialise DB + face models
     db.init_db()
     face_engine.load_all_embeddings()
     _ensure_snapshot_dirs()
+
 
     if not os.path.exists(cfg.PPE_MODEL_PATH):
         print(f"[ERROR] PPE model not found: {cfg.PPE_MODEL_PATH}")
@@ -274,6 +329,7 @@ def run(camera_index: int, threshold: float, cooldown: float) -> int:
     face_worker.start()
 
     last_logged: dict = {}   # key → last log timestamp (debounce)
+    last_face_crop = None
 
     print("[INFO] Unified Entry Monitor running. Press 'q' or ESC to quit.")
     print(f"[INFO] Mandated PPE: {cfg.MANDATED_SET}")
@@ -293,13 +349,31 @@ def run(camera_index: int, threshold: float, cooldown: float) -> int:
             best_face_name = None
             best_face_staff_id = None
             best_face_sim = 0.0
+            best_face_box = None
 
-            for _, _, _, _, m in face_results:
+            for x1, y1, x2, y2, m in face_results:
                 if m.decision == "AUTHORIZED" and m.similarity > best_face_sim:
                     best_face_decision = m.decision
                     best_face_name = m.name
                     best_face_staff_id = m.staff_id
                     best_face_sim = m.similarity
+                    best_face_box = (x1, y1, x2, y2)
+
+            # Maintain latest face crop for logging snapshot (only face bounding box)
+            if best_face_box is not None:
+                bx1, by1, bx2, by2 = best_face_box
+                h, w = frame.shape[:2]
+                bx1, by1 = max(0, bx1), max(0, by1)
+                bx2, by2 = min(w, bx2), min(h, by2)
+                if bx2 > bx1 and by2 > by1:
+                    last_face_crop = frame[by1:by2, bx1:bx2].copy()
+            elif face_results and sm.state != State.IDLE:
+                fx1, fy1, fx2, fy2 = face_results[0][:4]
+                h, w = frame.shape[:2]
+                fx1, fy1 = max(0, fx1), max(0, fy1)
+                fx2, fy2 = min(w, fx2), min(h, fy2)
+                if fx2 > fx1 and fy2 > fy1:
+                    last_face_crop = frame[fy1:fy2, fx1:fx2].copy()
 
             # --- PPE detection (main thread) ---
             ppe_names, ppe_boxes = _detect_ppe(frame)
@@ -320,7 +394,13 @@ def run(camera_index: int, threshold: float, cooldown: float) -> int:
                 key = log.get('staff_id') or "UNKNOWN"
                 if now - last_logged.get(key, 0) >= cooldown:
                     last_logged[key] = now
-                    snapshot_path = _save_snapshot(frame, log['decision'], key)
+                    snapshot_path = _save_snapshot(
+                        frame,
+                        log['decision'],
+                        key,
+                        face_box=best_face_box,
+                        face_crop=last_face_crop,
+                    )
                     db.insert_entry_log(
                         staff_id=log['staff_id'],
                         matched_name=log['name'],
@@ -340,6 +420,9 @@ def run(camera_index: int, threshold: float, cooldown: float) -> int:
                             item = item.strip()
                             if item:
                                 print(f">> ACTUATOR: dispense_{item} = True")
+
+            if sm.state == State.IDLE:
+                last_face_crop = None
 
             # --- rendering ---
             _draw_face_boxes(frame, face_results)
