@@ -16,3 +16,15 @@ filter*.py
 train*.ipynb
 yolo*.pt
 weights/
+test/
+temp_media/
+report_figures/
+report_figures_hw/
+extracted_report_media/
+build_invention_disclosure.py
+build_report_doc.py
+*.txt
+report_builder_utils.py
+create_final_report_pptx.py
+.gitignore
+*cache*/
