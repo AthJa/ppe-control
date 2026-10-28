@@ -24,6 +24,7 @@ extracted_report_media/
 build_invention_disclosure.py
 build_report_doc.py
 *.txt
+!requirements*.txt
 report_builder_utils.py
 create_final_report_pptx.py
 .gitignore

@@ -34,50 +34,140 @@ Only `AUTHORIZED` (enrolled + authorized) staff trigger PPE evaluation. Unknown 
 
 ---
 
-## Setup
+## System Requirements for Implementation
+* **Operating System**: Windows 10/11 (64-bit) or Linux (Ubuntu 20.04/22.04 LTS). *(Note: Windows 7 is not supported due to modern Python 3.10+ and PyTorch/OpenCV runtime requirements).*
+* **Python**: Python 3.10 – 3.13 (64-bit).
+* **Hardware**:
+  * **CPU-only mode**: Quad-Core Intel/AMD CPU, 4 GB RAM.
+  * **GPU mode (optional)**: NVIDIA GPU with CUDA 12.x support (e.g., GTX 1650, RTX 3050+), 8 GB RAM.
+* **Camera**: Standard USB Webcam (720p or 1080p).
 
+---
+
+## Minimal Deployment (Running Implementation Only)
+
+If you are transferring the project to a new target machine to **run only the implementation** (no training, datasets, or test suites required), follow these steps:
+
+### 1. Transfer the Minimal File Bundle
+Copy only the following files and folders to your target system:
+```text
+project-root/
+├── unified_entry_monitor.py       # Main camera capture & inference pipeline
+├── unified_config.py              # Centralized configuration & thresholds
+├── unified_state_machine.py       # Access arbitration finite state machine
+├── ppe_filter.py                  # Bounding box constraints & glove IoU logic
+├── face_tracker.py                # Bounding box smoothing & decision hysteresis
+├── requirements_run.txt           # Minimal runtime package list
+├── model/
+│   └── best.pt                    # Pretrained YOLO PPE weights
+└── facerecg-main/
+    ├── app/
+    │   ├── face_engine.py         # YuNet detection + FaceNet embeddings
+    │   ├── db.py                  # SQLite database interface
+    │   ├── config.py              # Face engine parameters
+    │   ├── schema.sql             # Database schema
+    │   └── models/
+    │       └── face_detection_yunet_2023mar.onnx  # YuNet face detector model
+    └── data_store/
+        └── face_recognition.db    # Enrolled staff database & embeddings
+```
+
+### 2. Create and Activate Virtual Environment
+Open PowerShell or Command Prompt in the project root:
 ```bash
-# Activate the project venv
-.\venv\Scripts\activate       # Windows
+# Windows
+python -m venv venv
+.\venv\Scripts\activate
 
-# Install dependencies (Python 3.13 compatible)
+# Linux / macOS
+python3 -m venv venv
+source venv/bin/activate
+```
+
+### 3. Install Runtime Dependencies
+
+Choose either **Option A (CPU-Only)** or **Option B (GPU Accelerated)**:
+
+#### Option A: CPU-Only (Recommended for PCs/Laptops without dedicated NVIDIA GPU)
+```bash
+# 1. Install lightweight CPU PyTorch build (~200 MB)
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+
+# 2. Install core runtime packages (OpenCV, Ultralytics, NumPy, Pandas, Pillow, PyYAML)
+pip install -r requirements_run.txt
+
+# 3. Install facenet-pytorch with --no-deps (prevents pip from downgrading numpy on Python 3.13)
+pip install facenet-pytorch --no-deps
+```
+
+#### Option B: NVIDIA GPU (With CUDA 12.4 acceleration)
+```bash
+# 1. Install CUDA 12.4 PyTorch build
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
+
+# 2. Install core runtime packages
+pip install -r requirements_run.txt
+
+# 3. Install facenet-pytorch with --no-deps
+pip install facenet-pytorch --no-deps
+```
+
+---
+
+## Full Development Setup (Optional)
+If you want to train models, run the Streamlit admin dashboard, or execute the automated pytest suite:
+```bash
 pip install -r requirements.txt
 pip install facenet-pytorch --no-deps
 ```
 
-Make sure you have:
-1. **A trained PPE model** at `model/best.pt`  
-   (or trained via `step3_train_medical_ppe.py`).
-2. **At least one enrolled staff member** in the face recognition database  
-   (run `streamlit run facerecg-main/app/Home.py` and register staff first).
-
 ---
 
-## Running
+## Running the Implementation
 
-### Unified monitor (recommended)
+### 1. Verify Prerequisites
+Before launching the gate monitor, ensure:
+1. The trained PPE model exists at `model/best.pt`.
+2. The SQLite database at `facerecg-main/data_store/face_recognition.db` contains at least one authorized staff profile. *(If starting fresh, run `streamlit run facerecg-main/app/Home.py` once to register staff members).*
+
+### 2. Start the Unified Entry Monitor
 ```bash
 python unified_entry_monitor.py
 ```
 
-Optional flags:
+### Optional Command-Line Arguments:
 ```bash
-python unified_entry_monitor.py --camera-index 0 --threshold 0.62 --cooldown 15
+# Custom webcam index (default: 0)
+python unified_entry_monitor.py --camera-index 1
+
+# Custom face matching cosine similarity threshold (default: 0.50)
+python unified_entry_monitor.py --threshold 0.55
+
+# Custom cooldown period between repeated logs for the same person (default: 15s)
+python unified_entry_monitor.py --cooldown 20
 ```
 
-### Streamlit admin dashboard
+### Controls & HUD Display:
+* **Live Video Window**: Displays real-time camera feed with:
+  * **Face Bounding Box**: Green (`AUTHORIZED`), Red (`DENIED`), or Orange (`UNKNOWN`).
+  * **PPE Bounding Boxes**: Mask (Red), Gloves (Green), Goggles (Cyan), Coverall (Orange).
+  * **HUD Header**: Current FSM state (`IDLE`, `EVALUATING_PPE`, or `GRANTED`), recognized staff name, and evaluation countdown timer.
+  * **Bottom HUD**: List of validated PPE items detected over the rolling temporal window.
+* **Exit**: Press `q` or `ESC` in the video window to safely stop worker threads and close the camera.
+
+---
+
+## Standalone Tools & Dashboard (Optional)
+
+### Streamlit Admin Dashboard
 ```bash
 streamlit run facerecg-main/app/Home.py
 ```
+Provides staff registration, authorization management, audit log inspection, and PPE compliance statistics.
 
-The dashboard now shows:
-- Staff registration / authorization management
-- Entry logs with **PPE status** and **missing PPE** columns
-- PPE compliance rate metrics
-
-### Original standalone scripts (still work independently)
+### Standalone Inference Modules
 ```bash
-python facerecg-main/app/entry_monitor.py          # face recognition only
+python facerecg-main/app/entry_monitor.py          # Face recognition only
 python step4_compliance_arbiter_medical_ppe.py     # PPE detection only
 ```
 

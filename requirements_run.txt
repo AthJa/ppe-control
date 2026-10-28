@@ -1,0 +1,41 @@
+# ==============================================================================
+# Unified PPE Detection + Face Recognition Entry System
+# Minimal Runtime Dependencies (Implementation / Inference Only)
+# ==============================================================================
+# This file contains ONLY the packages required to run unified_entry_monitor.py.
+# Heavy training tools, notebooks, datasets, testing, and report generation
+# libraries (streamlit, pytest, python-docx, python-pptx, etc.) are omitted.
+#
+# Quick Install:
+# ------------------------------------------------------------------------------
+# Option A: CPU-Only (Recommended for standard PC/laptops without NVIDIA GPU):
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+#   pip install -r requirements_run.txt
+#   pip install facenet-pytorch --no-deps
+#
+# Option B: NVIDIA GPU (CUDA 12.4 Acceleration):
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
+#   pip install -r requirements_run.txt
+#   pip install facenet-pytorch --no-deps
+# ==============================================================================
+
+# Core Computer Vision & Array/Data Processing
+numpy>=1.26.0
+opencv-python>=4.8.0
+pandas>=2.0.0
+pillow>=10.0.0
+PyYAML>=6.0
+
+# Deep Learning Inference & Object Detection
+torch>=2.2.0
+torchvision>=0.17.0
+ultralytics>=8.2.0
+
+# Face Recognition (InceptionResnetV1)
+# Note: On Python 3.13, facenet-pytorch specifies an outdated numpy<2.0.0 in metadata.
+# Install it with --no-deps so pip does not downgrade or attempt to compile numpy:
+#   pip install facenet-pytorch>=2.6.0 --no-deps
+# facenet-pytorch>=2.6.0
+
+# Optional: Microcontroller Actuation (Arduino USB Serial)
+# pyserial>=3.5
